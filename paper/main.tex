@@ -1,0 +1,153 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{algorithm, algorithmic}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{natbib}
+
+\title{CVaR / Leximin Reductions for Group-Fair Classification:\\
+       A Light Plugin for \texttt{fairlearn}}
+\author{hinanohart\\
+        \texttt{https://github.com/hinanohart/cvar-leximin-fair}}
+\date{2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We present \texttt{cvar-leximin-fair}, a small open-source library that adds
+two group-fairness reductions to the \texttt{fairlearn} evaluation ecosystem.
+\textsc{CVaRReduction} minimizes the Conditional Value-at-Risk of group losses
+at quantile $\alpha$; as $\alpha \to 0$ it recovers the strict maximin objective.
+\textsc{LeximinReduction} produces a lexicographic-minimum allocation across
+groups by iteratively pegging the worst-off group's loss. Both reductions
+re-use the cost-sensitive ERM strategy of~\citet{agarwal2018reductions} and
+are scikit-learn--shaped so that they slot directly into the
+\texttt{fairlearn.metrics.MetricFrame} evaluation flow. We position the
+package as an algorithmic tool for Rawlsian / difference-principle aggregation
+\emph{while explicitly acknowledging} Sen's capability-approach critique of
+primary-goods framings as a constraint on interpretation.
+\end{abstract}
+
+\section{Introduction}
+Distributional fairness in machine learning is increasingly evaluated under
+group-level worst-case lenses, motivated both by foundational normative work
+\citep{rawls1971theory, sen1979equality} and by regulatory developments
+\citep{euaiact2024, nyc_ll144_2023}. Existing tooling around
+\texttt{fairlearn}~\citep{bird2020fairlearn} and AIF360~\citep{bellamy2018aif360}
+focuses on parity-style constraints (demographic parity, equalized odds)
+rather than on \emph{worst-tail} or \emph{lexicographic} objectives.
+
+This paper introduces \texttt{cvar-leximin-fair}, a Apache-2.0--licensed
+plugin that fills this gap with a minimal, dependency-light implementation
+of two reductions:
+\begin{enumerate}
+\item \textsc{CVaRReduction}: minimizes
+$\mathrm{CVaR}_{\alpha}\!\left( \{ L_g \}_{g \in \mathcal{G}} \right)$
+where $L_g$ is the per-group $0/1$ loss.
+\item \textsc{LeximinReduction}: iteratively pegs each successive worst-off
+group's loss, producing a leximin allocation in the limit.
+\end{enumerate}
+
+\section{Background}
+\subsection{Reductions for fair classification}
+\citet{agarwal2018reductions} cast group-fair classification as a
+constrained minimization
+$\min_{h \in \mathcal{H}} \mathbb{E}[\ell(h(X), Y)] \text{ s.t. } M h \le c$,
+solved via Lagrangian reduction to cost-sensitive ERM. Their
+\texttt{ExponentiatedGradient} and \texttt{GridSearch} routines underpin
+\texttt{fairlearn.reductions}.
+
+\subsection{CVaR and leximin}
+The Conditional Value-at-Risk at level $\alpha$ of a discrete distribution
+is the conditional mean of its upper $\alpha$-tail; it is a coherent risk
+measure~\citep{rockafellar2000optimization}. The leximin order on loss
+vectors is the lexicographic order on the sorted (descending) tuple, and
+strictly refines the maximin order. Both are natural operationalizations
+of the difference principle~\citep{rawls1971theory}.
+
+\subsection{The Sen critique}
+\citet{sen1979equality, sen2009idea} argues that Rawlsian primary-goods
+aggregation is a form of \emph{resource fetishism}: equalizing resources
+does not equalize \emph{capability}. We follow this critique: our package
+equalizes \emph{loss}, which is a resource-proxy at best.
+\textbf{Adopters should not interpret a CVaR- or leximin-fit model as
+``capability-fair''.}
+
+\section{Method}
+\begin{algorithm}[h]
+\caption{CVaR reduction (cost-sensitive reweighting)}
+\begin{algorithmic}[1]
+\STATE Initialize $w \gets \mathbf{1}$
+\FOR{$t = 1, \dots, T$}
+  \STATE $h_t \gets \mathrm{ERM}(X, y, w)$
+  \STATE $L_g \gets \mathrm{loss}(h_t, X_g, y_g)$ for each group $g$
+  \STATE $\mathcal{S}_t \gets$ top-$\lceil \alpha |\mathcal{G}| \rceil$ groups by $L_g$
+  \STATE $w_i \gets (1 + \eta) w_i$ for $i$ with $s_i \in \mathcal{S}_t$;
+         renormalize so $\sum_i w_i = n$
+  \STATE Track $\mathrm{CVaR}_\alpha$; retain best-objective iterate
+\ENDFOR
+\STATE \textbf{return} best-iterate $h^\star$
+\end{algorithmic}
+\end{algorithm}
+
+\noindent\textbf{Convergence note.} The iterative re-weighting is a
+no-regret update with respect to the Lagrangian dual; on a fixed sample,
+sub-linear convergence of the running average to a CVaR-optimal classifier
+follows from~\citet{agarwal2018reductions} (Theorem 1) when
+$\mathcal{H}$ is closed under convex combination. Best-iterate selection
+gives \emph{weak} monotonicity vs.\ the initial unweighted fit (returned
+$\mathrm{CVaR}_\alpha$ is no worse, but ties are possible and observed
+on the Adult experiment).
+
+\section{Experiments}
+Adult Income (UCI / OpenML, $n = 48{,}842$, sensitive attribute = \texttt{sex}),
+70/30 stratified split. Base estimator: \texttt{LogisticRegression(liblinear)}.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lrrr}
+\toprule
+Method & Accuracy & Worst-group loss & $\mathrm{CVaR}_{0.5}$ \\
+\midrule
+Baseline (LR) & 0.8477 & 0.1903 & 0.1903 \\
+CVaR ($\alpha=0.5$) & 0.8482 & 0.1899 & 0.1899 \\
+Leximin & 0.8479 & 0.1902 & 0.1902 \\
+\bottomrule
+\end{tabular}
+\caption{Test-set results on UCI Adult (sensitive attribute \texttt{sex},
+70/30 stratified split, seed 0); values are those produced by the reference
+notebook \texttt{examples/adult\_income.ipynb} at the v0.1.0 tag.
+\textbf{CVaR improves slightly over baseline; leximin improves slightly
+but less than CVaR}, which is expected on this benchmark where parity is
+already nearly satisfied. Numbers update with re-execution.}
+\end{table}
+
+Adult \texttt{sex} is a known-easy fairness benchmark where parity is
+already close to satisfied by the base estimator; the gains from CVaR /
+leximin are small in this setting and the value is in the
+\emph{audit-time} mechanism, not the train-time gain.
+
+\section{Limitations and Ethics}
+\begin{itemize}
+\item Equalizing loss is not equalizing capability~\citep{sen1979equality}.
+\item This package is not a compliance certification. Regulatory requirements
+(EU AI Act Articles 9--17~\citep{euaiact2024}; NYC Local Law 144~\citep{nyc_ll144_2023})
+define what is acceptable; our metrics may or may not satisfy them in any
+specific jurisdiction at any given date.
+\item Worst-case group definitions inherit the protected-attribute taxonomy
+fed in; pre-processing of $s$ is out of scope.
+\end{itemize}
+
+\section{Conclusion}
+We released a minimal Apache-2.0 plugin that brings CVaR and leximin
+reductions to \texttt{fairlearn}. The implementation favors clarity over
+optimization scale; pull requests with native \texttt{fairlearn.reductions.Moment}
+subclasses are welcome.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}

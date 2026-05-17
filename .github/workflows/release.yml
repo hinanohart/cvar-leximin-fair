@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write  # required for PyPI trusted publishing (OIDC)
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/cvar-leximin-fair/
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheels + sdist
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+          python -m build
+      - name: Publish to PyPI via trusted publishing
+        # This step is a no-op until the project is configured on PyPI with
+        # a Trusted Publisher pointing at this repo + environment. See
+        # https://docs.pypi.org/trusted-publishers/ for setup.
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
