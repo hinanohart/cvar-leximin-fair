@@ -36,13 +36,18 @@ jobs:
       - name: License guard (no AGPL / SSPL in core deps)
         run: |
           pip install pip-licenses
-          # fail the build if any installed dependency is AGPL-family
-          pip-licenses --format=plain-vertical --with-license-file --no-license-path \
-            | tee installed-licenses.txt
-          if grep -E -i "AGPL|Affero|SSPL|Server Side Public License" installed-licenses.txt; then
-            echo "::error::strong-copyleft license detected in dependency closure"
-            exit 1
-          fi
+          # fail on AGPL / Affero / SSPL via pip-licenses' native classifier check.
+          # (Grepping license bodies is unreliable: GPL licenses reference AGPL in
+          # their compatibility clauses, which produces false positives.)
+          pip-licenses --fail-on="AGPL;Affero;Affero General Public License;SSPL;Server Side Public License"
+          # Save a snapshot for diff review on PRs.
+          pip-licenses --format=plain --order=license > installed-licenses.txt
+      - name: Upload license snapshot
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: installed-licenses
+          path: installed-licenses.txt
       - name: Upload coverage
         if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v4
