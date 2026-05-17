@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Rawlsian fairness via CVaR / leximin reductions for fairlearn"
+authors:
+  - family-names: "Hart"
+    given-names: "Hinano"
+    alias: "hinanohart"
+type: software
+license: "NOASSERTION"
+repository-code: "https://github.com/hinanohart/cvar-leximin-fair"
+url: "https://github.com/hinanohart/cvar-leximin-fair"
+version: "0.1.1"
+date-released: "2026-05-17"
+keywords:
+  - "cvar"
+  - "fairlearn"
+  - "fairness"
+  - "python"
+  - "scikit-learn"
+  - "leximin"
+  - "rawlsian"
