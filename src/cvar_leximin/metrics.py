@@ -76,6 +76,12 @@ def worst_quantile_gap(
 
     Returns the difference ``CVaR_alpha − bestCVaR_alpha`` where the best tail
     is the *minimum*-loss tail. Smaller gap = more leximin-fair.
+
+    Caveat: with ``G`` groups the tail size is ``n = max(1, ceil(alpha * G))``.
+    When ``2 * n > G`` (i.e. ``alpha >= 0.5`` for ``G = 2, 3`` and similar small-G
+    regimes) the worst and best tails overlap on the middle group(s) and the gap
+    is biased toward zero. For meaningful tail separation use ``alpha`` such that
+    ``2 * ceil(alpha * G) <= G``.
     """
     losses = list(subgroup_losses(y_true, y_pred, sensitive_features).values())
     if not losses:

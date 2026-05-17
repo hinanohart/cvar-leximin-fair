@@ -46,22 +46,29 @@ pip install "cvar-leximin-fair[dev]"       # adds dev / test deps
 ## Quick start
 
 ```python
+import numpy as np
+from sklearn.datasets import make_classification
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 
-from cvar_leximin import CVaRReduction, LeximinReduction
-from cvar_leximin.metrics import subgroup_cvar, leximin_vector
+from cvar_leximin import CVaRReduction
 from cvar_leximin.fairlearn_compat import summary
 
+# Synthetic example: replace X, y, sensitive with your own data.
+rng = np.random.default_rng(0)
+X, y = make_classification(n_samples=600, n_features=8, random_state=0)
+sensitive = rng.choice(["A", "B"], size=len(y))
+
 X_tr, X_te, y_tr, y_te, s_tr, s_te = train_test_split(
-    X, y, sensitive, test_size=0.3, stratify=sensitive, random_state=0
+    X, y, sensitive, test_size=0.3, stratify=sensitive, random_state=0,
 )
 
-clf = CVaRReduction(LogisticRegression(max_iter=500), alpha=0.5, max_iter=10).fit(
-    X_tr, y_tr, sensitive_features=s_tr,
-)
+clf = CVaRReduction(
+    LogisticRegression(max_iter=500), alpha=0.5, max_iter=10,
+).fit(X_tr, y_tr, sensitive_features=s_tr)
 
 print(summary(y_te, clf.predict(X_te), s_te, alpha=0.5))
+# example shape (numbers vary by seed and split):
 # {'per_group_loss': {'A': 0.18, 'B': 0.21},
 #  'cvar_alpha': 0.21,
 #  'leximin_vector': [0.21, 0.18]}
@@ -119,8 +126,12 @@ operators most naturally implement. But we want to be explicit:
 
 ## Roadmap
 
-- **v0.1.0** (this release): MVP reductions + metrics + notebook + paper skeleton.
-- **v0.2.0**: optional `audit_schema/` module (LL144-shaped JSON output) — gated on
+- **v0.1.x** (current): MVP reductions + metrics + notebook + paper skeleton.
+  Estimators are **sklearn-shape**, not subclasses of `fairlearn.reductions.Moment`;
+  evaluation interop is via `fairlearn.metrics.MetricFrame` (see `fairlearn_compat`).
+- **v0.2.0**: (a) native `fairlearn.reductions.Moment` subclass so these
+  reductions can be driven by `ExponentiatedGradient` / `GridSearch`; (b)
+  optional `audit_schema/` module (LL144-shaped JSON output) — gated on
   regulatory clarity; deliberately deferred so a schema change does not break core.
 - **v0.3.0**: companion `rawlsian-bench` benchmark dataset repo (separate Apache-2.0).
 - **Not planned**: standalone "Rawlsian compliance certification" — out of scope.

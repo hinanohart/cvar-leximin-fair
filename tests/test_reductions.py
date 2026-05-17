@@ -164,3 +164,58 @@ def test_single_group_does_not_crash():
     s = np.array(["only"] * 60)
     clf = CVaRReduction(_base(), max_iter=2).fit(X, y, sensitive_features=s)
     assert clf.predict(X).shape == y.shape
+
+
+def test_rejects_estimator_without_sample_weight(synth_groups):
+    """KNN does not accept sample_weight; we should fail clearly up front."""
+    from sklearn.neighbors import KNeighborsClassifier
+
+    d = synth_groups
+    with pytest.raises(TypeError, match="sample_weight"):
+        CVaRReduction(KNeighborsClassifier()).fit(
+            d["X"], d["y"], sensitive_features=d["sensitive_features"]
+        )
+    with pytest.raises(TypeError, match="sample_weight"):
+        LeximinReduction(KNeighborsClassifier()).fit(
+            d["X"], d["y"], sensitive_features=d["sensitive_features"]
+        )
+
+
+def test_decision_function_propagates(synth_groups):
+    """decision_function should delegate to base estimator when available."""
+    d = synth_groups
+    clf = CVaRReduction(_base(), alpha=0.34, max_iter=3).fit(
+        d["X"], d["y"], sensitive_features=d["sensitive_features"]
+    )
+    scores = clf.decision_function(d["X"])
+    assert scores.shape == (len(d["y"]),)
+
+
+def test_decision_function_absent_raises(synth_groups):
+    """When the base estimator lacks decision_function, raise AttributeError."""
+    from sklearn.tree import DecisionTreeClassifier
+
+    d = synth_groups
+    clf = CVaRReduction(DecisionTreeClassifier(max_depth=3), alpha=0.34, max_iter=2).fit(
+        d["X"], d["y"], sensitive_features=d["sensitive_features"]
+    )
+    with pytest.raises(AttributeError, match="decision_function"):
+        clf.decision_function(d["X"])
+
+
+def test_random_state_propagates_and_is_deterministic(synth_groups):
+    """random_state forwarded to base estimator yields reproducible fits."""
+    from sklearn.ensemble import GradientBoostingClassifier
+
+    d = synth_groups
+
+    def _gb():
+        return GradientBoostingClassifier(n_estimators=10, max_depth=2)
+
+    clf1 = CVaRReduction(_gb(), alpha=0.34, max_iter=3, random_state=7).fit(
+        d["X"], d["y"], sensitive_features=d["sensitive_features"]
+    )
+    clf2 = CVaRReduction(_gb(), alpha=0.34, max_iter=3, random_state=7).fit(
+        d["X"], d["y"], sensitive_features=d["sensitive_features"]
+    )
+    np.testing.assert_array_equal(clf1.predict(d["X"]), clf2.predict(d["X"]))

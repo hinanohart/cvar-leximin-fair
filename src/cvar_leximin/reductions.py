@@ -17,11 +17,19 @@ post-processing predictions or by modifying the model class.
 
 Naming intentionally avoids the word "Rawls" so that the package is judged on the
 algorithms, not on the philosophy. See README for the Sen capability acknowledgement.
+
+Note on the CVaR-α parameter: with ``G`` groups the worst-tail size is
+``max(1, ceil(alpha * G))``, so ``alpha`` is effectively discrete. For typical
+fairness benchmarks (``G in {2..5}``) only a few distinct CVaR levels exist;
+the smoothness suggested by the continuous ``alpha`` parameter is an
+abstraction over a discrete set of tails.
 """
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
+from inspect import Parameter, signature
 
 import numpy as np
 from sklearn.base import BaseEstimator, ClassifierMixin, clone
@@ -36,6 +44,47 @@ def _as_1d(a: ArrayLike) -> np.ndarray:
     if arr.ndim != 1:
         arr = arr.reshape(-1)
     return arr
+
+
+def _require_sample_weight_support(estimator: BaseEstimator) -> None:
+    """Raise a clear TypeError if the base estimator does not accept sample_weight.
+
+    Reductions rely on ``estimator.fit(X, y, sample_weight=...)`` so estimators
+    that drop the kwarg (e.g. KNeighborsClassifier, GaussianProcessClassifier)
+    would fail opaquely several iterations in. Fail loudly up front instead.
+    """
+    try:
+        params = signature(estimator.fit).parameters
+    except (TypeError, ValueError):
+        return  # cannot introspect; let it surface naturally
+    if "sample_weight" in params:
+        return
+    if any(p.kind is Parameter.VAR_KEYWORD for p in params.values()):
+        return  # **kwargs accepted, assume it will route through
+    raise TypeError(
+        f"Base estimator {type(estimator).__name__}.fit does not accept "
+        "sample_weight. Reductions require a re-weighting-capable estimator "
+        "(e.g. LogisticRegression, DecisionTreeClassifier, "
+        "GradientBoostingClassifier)."
+    )
+
+
+def _maybe_set_random_state(estimator: BaseEstimator, random_state: int | None) -> None:
+    """Best-effort propagation of ``random_state`` to the cloned base estimator."""
+    if random_state is None:
+        return
+    try:
+        params = estimator.get_params(deep=False)
+    except (TypeError, AttributeError):
+        return
+    if "random_state" in params:
+        with contextlib.suppress(TypeError, ValueError):
+            estimator.set_params(random_state=random_state)
+
+
+def _is_degenerate(y_pred: np.ndarray, n_classes: int) -> bool:
+    """A prediction vector that collapses to a single class when >=2 exist."""
+    return n_classes >= 2 and len(np.unique(y_pred)) < 2
 
 
 def _group_losses(
@@ -93,6 +142,10 @@ class CVaRReduction(BaseEstimator, ClassifierMixin):
         tail get their weights multiplied by ``(1 + eta)``.
     tol : float, default=1e-3
         Convergence tolerance on the CVaR objective.
+    random_state : int or None, default=None
+        Forwarded to the cloned base estimator when it accepts a ``random_state``
+        parameter. Has no effect on the reduction loop itself (which is
+        deterministic for a fixed ``X``, ``y``, ``sensitive_features``).
     """
 
     def __init__(
@@ -103,12 +156,14 @@ class CVaRReduction(BaseEstimator, ClassifierMixin):
         max_iter: int = 20,
         eta: float = 1.0,
         tol: float = 1e-3,
+        random_state: int | None = None,
     ) -> None:
         self.estimator = estimator
         self.alpha = alpha
         self.max_iter = max_iter
         self.eta = eta
         self.tol = tol
+        self.random_state = random_state
 
     def fit(
         self,
@@ -123,6 +178,7 @@ class CVaRReduction(BaseEstimator, ClassifierMixin):
             raise ValueError(f"max_iter must be >= 1; got {self.max_iter}")
         if self.eta <= 0:
             raise ValueError(f"eta must be > 0; got {self.eta}")
+        _require_sample_weight_support(self.estimator)
 
         X = np.asarray(X)
         y = _as_1d(y)
@@ -132,16 +188,18 @@ class CVaRReduction(BaseEstimator, ClassifierMixin):
 
         self.classes_ = unique_labels(y)
         self.groups_ = np.unique(s)
+        n_classes = len(self.classes_)
 
         sample_weight = np.ones(len(y), dtype=float)
         prev_cvar = np.inf
         self.history_ = _History()
         best_cvar = np.inf
-        best_estimator = None
+        best_estimator: BaseEstimator | None = None
         best_sample_weight = sample_weight.copy()
 
         for it in range(self.max_iter):
             est = clone(self.estimator)
+            _maybe_set_random_state(est, self.random_state)
             est.fit(X, y, sample_weight=sample_weight)
             y_pred = est.predict(X)
             gl = _group_losses(y, y_pred, s)
@@ -152,7 +210,10 @@ class CVaRReduction(BaseEstimator, ClassifierMixin):
             self.history_.worst.append(worst)
             self.history_.sample_weight_sum.append(float(sample_weight.sum()))
 
-            if cvar < best_cvar:
+            # only track non-degenerate iterations as "best"; collapsing to a
+            # single class can drive CVaR down artificially when one class is
+            # rare in every group.
+            if not _is_degenerate(y_pred, n_classes) and cvar < best_cvar:
                 best_cvar = cvar
                 best_estimator = est
                 best_sample_weight = sample_weight.copy()
@@ -171,6 +232,9 @@ class CVaRReduction(BaseEstimator, ClassifierMixin):
             new_w *= len(y) / new_w.sum()  # normalize total mass
             sample_weight = new_w
 
+        # fallback: if every iteration was degenerate, accept iter 0 anyway
+        if best_estimator is None:
+            best_estimator = est
         self.estimator_ = best_estimator
         self.sample_weight_ = best_sample_weight
         return self
@@ -186,6 +250,13 @@ class CVaRReduction(BaseEstimator, ClassifierMixin):
         if not hasattr(self.estimator_, "predict_proba"):
             raise AttributeError("Base estimator does not implement predict_proba")
         return self.estimator_.predict_proba(np.asarray(X))
+
+    def decision_function(self, X: ArrayLike) -> np.ndarray:
+        check_is_fitted(self, "estimator_")
+        assert self.estimator_ is not None
+        if not hasattr(self.estimator_, "decision_function"):
+            raise AttributeError("Base estimator does not implement decision_function")
+        return self.estimator_.decision_function(np.asarray(X))
 
 
 class LeximinReduction(BaseEstimator, ClassifierMixin):
@@ -208,6 +279,9 @@ class LeximinReduction(BaseEstimator, ClassifierMixin):
         Convergence tolerance on the worst-group loss inside each level.
     levels : int or None, default=None
         Number of lex levels to peg. ``None`` means *all groups*.
+    random_state : int or None, default=None
+        Forwarded to the cloned base estimator when it accepts a ``random_state``
+        parameter.
     """
 
     def __init__(
@@ -218,12 +292,14 @@ class LeximinReduction(BaseEstimator, ClassifierMixin):
         eta: float = 1.0,
         tol: float = 1e-3,
         levels: int | None = None,
+        random_state: int | None = None,
     ) -> None:
         self.estimator = estimator
         self.max_iter_per_level = max_iter_per_level
         self.eta = eta
         self.tol = tol
         self.levels = levels
+        self.random_state = random_state
 
     def fit(
         self,
@@ -236,6 +312,7 @@ class LeximinReduction(BaseEstimator, ClassifierMixin):
             raise ValueError("max_iter_per_level must be >= 1")
         if self.eta <= 0:
             raise ValueError("eta must be > 0")
+        _require_sample_weight_support(self.estimator)
 
         X = np.asarray(X)
         y = _as_1d(y)
@@ -245,6 +322,7 @@ class LeximinReduction(BaseEstimator, ClassifierMixin):
 
         self.classes_ = unique_labels(y)
         self.groups_ = np.unique(s)
+        n_classes = len(self.classes_)
         n_groups = len(self.groups_)
         n_levels = n_groups if self.levels is None else min(self.levels, n_groups)
 
@@ -252,8 +330,9 @@ class LeximinReduction(BaseEstimator, ClassifierMixin):
         pegged: set[object] = set()
         self.history_: list[dict[str, float | int | str]] = []
         best_lex_key: tuple = ()
-        best_estimator = None
+        best_estimator: BaseEstimator | None = None
         best_sample_weight = sample_weight.copy()
+        last_est: BaseEstimator | None = None
 
         def _lex_key(group_losses: dict[object, float]) -> tuple:
             # smaller key = lex-better (compare worst-first sorted descending,
@@ -265,7 +344,9 @@ class LeximinReduction(BaseEstimator, ClassifierMixin):
             level_worst_group: object | None = None
             for it in range(self.max_iter_per_level):
                 est = clone(self.estimator)
+                _maybe_set_random_state(est, self.random_state)
                 est.fit(X, y, sample_weight=sample_weight)
+                last_est = est
                 y_pred = est.predict(X)
                 gl = _group_losses(y, y_pred, s)
                 non_pegged = {g: gl[g] for g in gl if g not in pegged}
@@ -284,7 +365,9 @@ class LeximinReduction(BaseEstimator, ClassifierMixin):
                 )
 
                 lex_key = _lex_key(gl)
-                if best_estimator is None or lex_key < best_lex_key:
+                if not _is_degenerate(y_pred, n_classes) and (
+                    best_estimator is None or lex_key < best_lex_key
+                ):
                     best_lex_key = lex_key
                     best_estimator = est
                     best_sample_weight = sample_weight.copy()
@@ -301,6 +384,8 @@ class LeximinReduction(BaseEstimator, ClassifierMixin):
             if level_worst_group is not None:
                 pegged.add(level_worst_group)
 
+        if best_estimator is None:
+            best_estimator = last_est
         self.estimator_ = best_estimator
         self.sample_weight_ = best_sample_weight
         return self
@@ -316,3 +401,10 @@ class LeximinReduction(BaseEstimator, ClassifierMixin):
         if not hasattr(self.estimator_, "predict_proba"):
             raise AttributeError("Base estimator does not implement predict_proba")
         return self.estimator_.predict_proba(np.asarray(X))
+
+    def decision_function(self, X: ArrayLike) -> np.ndarray:
+        check_is_fitted(self, "estimator_")
+        assert self.estimator_ is not None
+        if not hasattr(self.estimator_, "decision_function"):
+            raise AttributeError("Base estimator does not implement decision_function")
+        return self.estimator_.decision_function(np.asarray(X))

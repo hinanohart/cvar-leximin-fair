@@ -68,6 +68,16 @@ vectors is the lexicographic order on the sorted (descending) tuple, and
 strictly refines the maximin order. Both are natural operationalizations
 of the difference principle~\citep{rawls1971theory}.
 
+\paragraph{Discreteness of $\alpha$ for finite $|\mathcal{G}|$.}
+With $G = |\mathcal{G}|$ groups the worst-tail size used in our implementation
+is $n_\alpha = \max(1, \lceil \alpha G \rceil)$. The CVaR objective therefore
+takes only $G$ distinct values as $\alpha$ varies in $(0, 1]$. For the small
+$G \in \{2, \dots, 5\}$ typical of group-fairness benchmarks, the continuous
+$\alpha$ parameter is an abstraction over a discrete set of tails and
+the sweep ``$\alpha = 1.0, 0.7, 0.5, \dots$'' may exhibit plateaus
+(the upper-half tails coincide on $G = 2$). Users should reason about
+$\alpha$ in units of $1/G$, not as a continuum.
+
 \subsection{The Sen critique}
 \citet{sen1979equality, sen2009idea} argues that Rawlsian primary-goods
 aggregation is a form of \emph{resource fetishism}: equalizing resources
@@ -93,14 +103,19 @@ equalizes \emph{loss}, which is a resource-proxy at best.
 \end{algorithmic}
 \end{algorithm}
 
-\noindent\textbf{Convergence note.} The iterative re-weighting is a
-no-regret update with respect to the Lagrangian dual; on a fixed sample,
-sub-linear convergence of the running average to a CVaR-optimal classifier
-follows from~\citet{agarwal2018reductions} (Theorem 1) when
-$\mathcal{H}$ is closed under convex combination. Best-iterate selection
-gives \emph{weak} monotonicity vs.\ the initial unweighted fit (returned
-$\mathrm{CVaR}_\alpha$ is no worse, but ties are possible and observed
-on the Adult experiment).
+\noindent\textbf{Honest convergence note.} Our update is a multiplicative-weights
+heuristic in the spirit of~\citet{agarwal2018reductions}; it is \emph{not}
+the exact Lagrangian reduction analysed in their Theorem~1, which bounds the
+\emph{average} iterate of a no-regret dual player. We do not claim that bound
+because we do not maintain the running-average classifier. Instead, the
+algorithm tracks every iterate's CVaR and returns the best one. This gives
+\emph{weak} monotonicity by construction: the returned model has
+$\mathrm{CVaR}_\alpha$ at most that of iteration~0 (the unweighted fit).
+Ties are possible and observed on the Adult experiment (Sec.~4), particularly
+when $G = 2$, where the discreteness of $\alpha$ further limits the number of
+distinct objectives attainable by reweighting. A native subclass of
+\texttt{fairlearn.reductions.Moment} that recovers the average-iterate guarantee
+is left to future work (see roadmap).
 
 \section{Experiments}
 Adult Income (UCI / OpenML, $n = 48{,}842$, sensitive attribute = \texttt{sex}),
