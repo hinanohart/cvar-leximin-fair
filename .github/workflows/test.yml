@@ -44,13 +44,13 @@ jobs:
           pip-licenses --format=plain --order=license > installed-licenses.txt
       - name: Upload license snapshot
         if: matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: installed-licenses
           path: installed-licenses.txt
       - name: Upload coverage
         if: matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-xml
           path: coverage.xml
