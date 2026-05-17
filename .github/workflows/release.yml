@@ -1,8 +1,16 @@
-name: Release
+name: Release (PyPI)
 
+# Manual trigger only. PyPI publication requires a Trusted-Publisher entry on
+# PyPI bound to this repo + the `pypi` environment. Until that is configured,
+# running this workflow will fail at the publish step. Set up Trusted Publisher
+# at https://pypi.org/manage/account/publishing/ then re-run via the Actions tab.
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag or ref to build from (e.g. v0.1.0)"
+        required: true
+        default: "v0.1.0"
 
 permissions:
   contents: read
@@ -16,6 +24,8 @@ jobs:
       url: https://pypi.org/project/cvar-leximin-fair/
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -25,9 +35,6 @@ jobs:
           pip install build
           python -m build
       - name: Publish to PyPI via trusted publishing
-        # This step is a no-op until the project is configured on PyPI with
-        # a Trusted Publisher pointing at this repo + environment. See
-        # https://docs.pypi.org/trusted-publishers/ for setup.
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
