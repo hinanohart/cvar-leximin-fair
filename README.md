@@ -133,7 +133,7 @@ operators most naturally implement. But we want to be explicit:
   reductions can be driven by `ExponentiatedGradient` / `GridSearch`; (b)
   optional `audit_schema/` module (LL144-shaped JSON output) — gated on
   regulatory clarity; deliberately deferred so a schema change does not break core.
-- **v0.3.0**: companion `rawlsian-bench` benchmark dataset repo (separate Apache-2.0).
+- **v0.3.0**: companion `rawlsian-bench` benchmark dataset repo (separate MIT).
 - **Not planned**: standalone "Rawlsian compliance certification" — out of scope.
 
 ## Development
@@ -170,7 +170,7 @@ The companion arXiv skeleton lives in [`paper/`](paper/).
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Third-party
+MIT. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Third-party
 acknowledgements: Agarwal et al. (2018) for the reductions strategy;
 `fairlearn` (MIT) for the evaluation interop; the UCI Machine Learning
 Repository for the Adult Income dataset used in the example notebook.
