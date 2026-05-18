@@ -2,7 +2,7 @@
 
 > **Rawlsian fairness via CVaR / leximin reductions for [fairlearn](https://github.com/fairlearn/fairlearn).**
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![CI](https://github.com/hinanohart/cvar-leximin-fair/actions/workflows/test.yml/badge.svg)](https://github.com/hinanohart/cvar-leximin-fair/actions/workflows/test.yml)
 
