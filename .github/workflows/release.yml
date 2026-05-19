@@ -10,7 +10,7 @@ on:
       ref:
         description: "Tag or ref to build from (e.g. v0.1.0)"
         required: true
-        default: "v0.1.0"
+        default: ""
 
 permissions:
   contents: read
